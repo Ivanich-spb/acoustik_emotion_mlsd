@@ -11,15 +11,53 @@
     ]
   },
   "main_lgbm": {
-    "macro_f1_mean": 0.5270532104427653,
-    "macro_f1_std": 0.016232044521076495,
+    "macro_f1_mean": 0.5281069014749931,
+    "macro_f1_std": 0.011042686687680825,
     "fold_scores": [
-      0.5034175948611713,
-      0.544233081798147,
-      0.5442014067573399,
-      0.5292030213611579,
-      0.5142109474360104
+      0.5106452299931337,
+      0.5342096997107864,
+      0.5441102219052208,
+      0.5252107355737669,
+      0.5263586201920578
     ]
+  },
+  "main_lgbm_tuning": {
+    "search_space": [
+      {
+        "n_estimators": 200,
+        "learning_rate": 0.1,
+        "macro_f1_mean": 0.5230487214127405,
+        "macro_f1_std": 0.014050897727220575
+      },
+      {
+        "n_estimators": 300,
+        "learning_rate": 0.1,
+        "macro_f1_mean": 0.5270532104427653,
+        "macro_f1_std": 0.016232044521076495
+      },
+      {
+        "n_estimators": 200,
+        "learning_rate": 0.2,
+        "macro_f1_mean": 0.5172301672636881,
+        "macro_f1_std": 0.015088088356004527
+      },
+      {
+        "n_estimators": 300,
+        "learning_rate": 0.05,
+        "macro_f1_mean": 0.5254001084370951,
+        "macro_f1_std": 0.014141187104795505
+      },
+      {
+        "n_estimators": 500,
+        "learning_rate": 0.05,
+        "macro_f1_mean": 0.5281069014749931,
+        "macro_f1_std": 0.011042686687680825
+      }
+    ],
+    "selected": {
+      "n_estimators": 500,
+      "learning_rate": 0.05
+    }
   },
   "illustrative_pilot_correlation": {
     "n": 6171,

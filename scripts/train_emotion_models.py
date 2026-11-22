@@ -33,6 +33,17 @@ NON_FEATURE_COLS = {
     "level",
 }
 
+# Небольшая сетка для подбора LightGBM - специально узкая: 7442 строк на 91 группу
+# (спикера) не оправдывают широкий перебор, риск подогнать валидацию растёт быстрее,
+# чем польза от более тонкой сетки.
+LGBM_SEARCH_SPACE = [
+    {"n_estimators": 200, "learning_rate": 0.1},
+    {"n_estimators": 300, "learning_rate": 0.1},
+    {"n_estimators": 200, "learning_rate": 0.2},
+    {"n_estimators": 300, "learning_rate": 0.05},
+    {"n_estimators": 500, "learning_rate": 0.05},
+]
+
 # Группировка по arousal из EDA (docs/eda_report.md, раздел 2): anger/happy/fear -
 # высокий pitch и энергия, мало пауз; sad/neutral - низкий pitch и энергия, много пауз.
 # disgust исключён - его arousal по EDA неоднозначен.
@@ -62,6 +73,27 @@ def evaluate(model, x, y, groups, n_splits):
         oof_pred[test_idx] = pred
         fold_scores.append(f1_score(y.iloc[test_idx], pred, average="macro"))
     return np.array(fold_scores), oof_pred
+
+
+def select_lgbm_config(x, y, groups, n_splits):
+    """Перебор нескольких конфигураций LightGBM на той же GroupKFold-валидации,
+    что и финальная оценка - критерий отбора (macro-F1) тот же, что и итоговая
+    метрика, чтобы не подбирать модель под метрику, которая потом не проверяется.
+    """
+    log = []
+    best = None
+    for params in LGBM_SEARCH_SPACE:
+        model = lgb.LGBMClassifier(random_state=0, class_weight="balanced", verbose=-1, **params)
+        scores, _ = evaluate(model, x, y, groups, n_splits)
+        entry = {
+            **params,
+            "macro_f1_mean": float(scores.mean()),
+            "macro_f1_std": float(scores.std()),
+        }
+        log.append(entry)
+        if best is None or entry["macro_f1_mean"] > best["macro_f1_mean"]:
+            best = entry
+    return best, log
 
 
 def weighted_aggregation_score(df):
@@ -122,6 +154,11 @@ def main():
     y = df["emotion"]
     groups = df["actor_id"]
 
+    best_lgbm_config, lgbm_tuning_log = select_lgbm_config(x, y, groups, args.n_splits)
+    selected_params = {
+        k: v for k, v in best_lgbm_config.items() if k not in ("macro_f1_mean", "macro_f1_std")
+    }
+
     models = {
         "baseline_logreg": Pipeline(
             [
@@ -130,7 +167,7 @@ def main():
             ]
         ),
         "main_lgbm": lgb.LGBMClassifier(
-            random_state=0, class_weight="balanced", n_estimators=300, verbose=-1
+            random_state=0, class_weight="balanced", verbose=-1, **selected_params
         ),
     }
 
@@ -159,6 +196,7 @@ def main():
     ).sort_values("importance", ascending=False)
     importance_df.to_csv(out_dir / "main_model_feature_importance.csv", index=False)
 
+    results["main_lgbm_tuning"] = {"search_space": lgbm_tuning_log, "selected": selected_params}
     results["illustrative_pilot_correlation"] = illustrative_pilot_correlation(df)
     results["n_samples"] = int(len(df))
     results["n_speakers"] = int(groups.nunique())
