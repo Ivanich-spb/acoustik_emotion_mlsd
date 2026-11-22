@@ -30,7 +30,7 @@
 docs/                    дизайн-документы и отчёты домашних заданий
   ml_system_design_doc.md
   eda_report.md
-scripts/                 скрипты анализа данных (EDA и т.п.)
+scripts/                 скрипты анализа данных, обучения и валидации моделей
 reports/                 сгенерированные отчёты, графики, агрегаты
 pyproject.toml           конфигурация ruff
 .pre-commit-config.yaml  pre-commit hooks

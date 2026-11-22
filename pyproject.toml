@@ -16,6 +16,10 @@ audio = [
     "soundfile",
     "faster-whisper",
 ]
+ml = [
+    "scikit-learn",
+    "scipy",
+]
 
 [tool.ruff]
 line-length = 100
