@@ -1,37 +1,37 @@
 """Обучение и валидация baseline- и основной модели эмоций по аудиоканалу (ДЗ №3, Этап 2).
 
-Вход - потабличные акустические признаки CREMA-D (см. extract_crema_acoustic_features.py),
-выход - метрики по фолдам, confusion matrix основной модели и иллюстративная
-проверка baseline-агрегации (п. 3.2 дизайн-документа) на суррогатной бинарной метке
-"высокий/низкий arousal" вместо недоступной реальной экспертной разметки.
+Вход - потабличные акустические признаки CREMA-D (см. extract_crema_acoustic_features.py:
+базовые признаки + MFCC, спектральные статистики, перцентили pitch), выход - метрики по
+фолдам, важность признаков и confusion matrix основной модели (LightGBM), а также
+иллюстративная проверка baseline-агрегации (п. 3.2 дизайн-документа) на суррогатной
+бинарной метке "высокий/низкий arousal" вместо недоступной реальной экспертной разметки.
 """
 
 import argparse
 import json
 from pathlib import Path
 
+import lightgbm as lgb
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
-from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix, f1_score
 from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-FEATURE_COLS = [
-    "duration_s",
-    "rms_mean",
-    "rms_std",
-    "zcr_mean",
-    "silence_ratio",
-    "pitch_mean_hz",
-    "pitch_std_hz",
-    "voiced_fraction",
-    "pitch_missing",
-]
+# Колонки-метаданные файла - не признаки для модели.
+NON_FEATURE_COLS = {
+    "file",
+    "actor_id",
+    "sentence_code",
+    "emotion_code",
+    "emotion",
+    "level_code",
+    "level",
+}
 
 # Группировка по arousal из EDA (docs/eda_report.md, раздел 2): anger/happy/fear -
 # высокий pitch и энергия, мало пауз; sad/neutral - низкий pitch и энергия, много пауз.
@@ -43,9 +43,13 @@ LOW_AROUSAL = {"sad", "neutral"}
 def load_features(path):
     df = pd.read_csv(path)
     df["pitch_missing"] = df["pitch_mean_hz"].isna().astype(int)
-    for col in ("pitch_mean_hz", "pitch_std_hz"):
-        df[col] = df[col].fillna(df[col].median())
-    return df
+    feature_cols = [c for c in df.columns if c not in NON_FEATURE_COLS]
+    # Единичные сбои извлечения (слишком короткий/тихий клип) закрываем медианой
+    # по всей выборке - сам факт сбоя для pitch уже отражён в pitch_missing.
+    for col in feature_cols:
+        if df[col].isna().any():
+            df[col] = df[col].fillna(df[col].median())
+    return df, feature_cols
 
 
 def evaluate(model, x, y, groups, n_splits):
@@ -113,8 +117,8 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    df = load_features(args.features_csv)
-    x = df[FEATURE_COLS]
+    df, feature_cols = load_features(args.features_csv)
+    x = df[feature_cols]
     y = df["emotion"]
     groups = df["actor_id"]
 
@@ -125,12 +129,15 @@ def main():
                 ("clf", LogisticRegression(max_iter=2000, class_weight="balanced")),
             ]
         ),
-        "main_histgb": HistGradientBoostingClassifier(random_state=0),
+        "main_lgbm": lgb.LGBMClassifier(
+            random_state=0, class_weight="balanced", n_estimators=300, verbose=-1
+        ),
     }
 
     labels = sorted(y.unique())
     per_class_f1 = {}
     results = {}
+    main_model_fitted = None
     for name, model in models.items():
         scores, oof_pred = evaluate(model, x, y, groups, args.n_splits)
         results[name] = {
@@ -139,16 +146,23 @@ def main():
             "fold_scores": [float(s) for s in scores],
         }
         per_class_f1[name] = f1_score(y, oof_pred, labels=labels, average=None)
-        if name == "main_histgb":
+        if name == "main_lgbm":
             plot_confusion_matrix(y, oof_pred, labels, out_dir / "main_model_confusion_matrix.png")
+            main_model_fitted = model.fit(x, y)
 
     per_class_df = pd.DataFrame(per_class_f1, index=labels)
     per_class_df.index.name = "emotion"
     per_class_df.to_csv(out_dir / "per_class_f1.csv")
 
+    importance_df = pd.DataFrame(
+        {"feature": feature_cols, "importance": main_model_fitted.feature_importances_}
+    ).sort_values("importance", ascending=False)
+    importance_df.to_csv(out_dir / "main_model_feature_importance.csv", index=False)
+
     results["illustrative_pilot_correlation"] = illustrative_pilot_correlation(df)
     results["n_samples"] = int(len(df))
     results["n_speakers"] = int(groups.nunique())
+    results["n_features"] = len(feature_cols)
     results["n_splits"] = args.n_splits
 
     out_path = out_dir / "model_results.json"

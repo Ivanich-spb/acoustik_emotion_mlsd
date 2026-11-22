@@ -76,11 +76,31 @@ def extract_one(path: Path):
         voiced = voiced[~np.isnan(voiced)] if voiced.size else voiced
         pitch_mean = float(np.mean(voiced)) if voiced.size else float("nan")
         pitch_std = float(np.std(voiced)) if voiced.size else float("nan")
+        pitch_p10 = float(np.percentile(voiced, 10)) if voiced.size else float("nan")
+        pitch_p90 = float(np.percentile(voiced, 90)) if voiced.size else float("nan")
         voiced_fraction = float(np.mean(voiced_flag)) if voiced_flag is not None else float("nan")
+        voiced_segment_count = (
+            int(np.sum(np.diff(voiced_flag.astype(int)) == 1) + (1 if voiced_flag[0] else 0))
+            if voiced_flag is not None
+            else 0
+        )
     except Exception:  # noqa: BLE001
-        pitch_mean = pitch_std = voiced_fraction = float("nan")
+        pitch_mean = pitch_std = pitch_p10 = pitch_p90 = voiced_fraction = float("nan")
+        voiced_segment_count = 0
 
-    return {
+    try:
+        mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+        mfcc_mean = mfcc.mean(axis=1)
+        mfcc_std = mfcc.std(axis=1)
+        spectral_centroid = float(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)[0]))
+        spectral_bandwidth = float(np.mean(librosa.feature.spectral_bandwidth(y=y, sr=sr)[0]))
+        spectral_rolloff = float(np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr)[0]))
+        spectral_flatness = float(np.mean(librosa.feature.spectral_flatness(y=y)[0]))
+    except Exception:  # noqa: BLE001
+        mfcc_mean = mfcc_std = np.full(13, np.nan)
+        spectral_centroid = spectral_bandwidth = spectral_rolloff = spectral_flatness = float("nan")
+
+    row = {
         "file": stem,
         "actor_id": actor_id,
         "sentence_code": sentence_code,
@@ -91,12 +111,24 @@ def extract_one(path: Path):
         "duration_s": duration,
         "rms_mean": float(np.mean(rms)),
         "rms_std": float(np.std(rms)),
+        "rms_range": float(np.max(rms) - np.min(rms)),
         "zcr_mean": float(np.mean(zcr)),
         "silence_ratio": silence_ratio,
         "pitch_mean_hz": pitch_mean,
         "pitch_std_hz": pitch_std,
+        "pitch_p10_hz": pitch_p10,
+        "pitch_p90_hz": pitch_p90,
         "voiced_fraction": voiced_fraction,
+        "voiced_segment_count": voiced_segment_count,
+        "spectral_centroid_mean": spectral_centroid,
+        "spectral_bandwidth_mean": spectral_bandwidth,
+        "spectral_rolloff_mean": spectral_rolloff,
+        "spectral_flatness_mean": spectral_flatness,
     }
+    for i in range(13):
+        row[f"mfcc{i + 1}_mean"] = float(mfcc_mean[i])
+        row[f"mfcc{i + 1}_std"] = float(mfcc_std[i])
+    return row
 
 
 def main():
